@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { PageHeader, Card, Button, Modal, Field, inputClass } from "@/components/ui";
 import { peso, formatDate } from "@/lib/format";
+import { reportError } from "@/lib/errors";
 import type { ExpenseCategory } from "@/lib/types";
 
 const CATEGORIES: ExpenseCategory[] = [
@@ -112,7 +113,7 @@ function AddExpenseModal({
     amount: number;
     description: string;
     supplier?: string;
-  }) => void;
+  }) => Promise<void>;
 }) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [category, setCategory] = useState<ExpenseCategory>("Materials");
@@ -127,7 +128,9 @@ function AddExpenseModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (!description.trim() || amount <= 0) return;
-          onSubmit({ date, category, amount, description: description.trim(), supplier: supplier.trim() || undefined });
+          onSubmit({ date, category, amount, description: description.trim(), supplier: supplier.trim() || undefined }).catch(
+            reportError
+          );
           setDate(new Date().toISOString().slice(0, 10));
           setCategory("Materials");
           setAmount(0);

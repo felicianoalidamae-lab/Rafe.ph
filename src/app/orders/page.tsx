@@ -5,6 +5,7 @@ import { useStore } from "@/lib/store";
 import { PageHeader, Card, Button, Badge, Modal, Field, inputClass } from "@/components/ui";
 import { peso, formatDate } from "@/lib/format";
 import { orderTotal } from "@/lib/metrics";
+import { reportError } from "@/lib/errors";
 import type { Order, OrderStatus, PaymentStatus, PaymentMethod, OrderItem } from "@/lib/types";
 
 const STATUSES: OrderStatus[] = ["Pending", "In Production", "Ready", "Completed", "Delivered", "Cancelled"];
@@ -181,7 +182,7 @@ function CreateOrderModal({ open, onClose }: { open: boolean; onClose: () => voi
             amountPaid: 0,
             paymentMethod: "Cash",
             items: items.map((it, i) => ({ ...it, id: `oi-new-${i}` })),
-          });
+          }).catch(reportError);
           reset();
           onClose();
         }}
@@ -391,13 +392,13 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
         <Button
           className="w-full"
           onClick={() => {
-            if (status !== order.status) updateOrderStatus(order.id, status);
+            if (status !== order.status) updateOrderStatus(order.id, status).catch(reportError);
             if (
               paymentStatus !== order.paymentStatus ||
               amountPaid !== order.amountPaid ||
               paymentMethod !== order.paymentMethod
             ) {
-              updateOrderPayment(order.id, paymentStatus, amountPaid, paymentMethod);
+              updateOrderPayment(order.id, paymentStatus, amountPaid, paymentMethod).catch(reportError);
             }
             onClose();
           }}

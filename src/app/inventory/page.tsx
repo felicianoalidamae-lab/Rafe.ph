@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { PageHeader, Card, Button, Modal, Field, inputClass } from "@/components/ui";
 import { peso, formatDate } from "@/lib/format";
+import { reportError } from "@/lib/errors";
 
 type ActionKind = "restock" | "produce" | "adjust-raw" | "adjust-finished" | null;
 
@@ -172,7 +173,7 @@ function RestockModal({
   open: boolean;
   onClose: () => void;
   rawMaterialId: string | null;
-  onSubmit: (id: string, quantity: number, cost: number, asExpense: boolean) => void;
+  onSubmit: (id: string, quantity: number, cost: number, asExpense: boolean) => Promise<void>;
 }) {
   const { rawMaterials } = useStore();
   const rm = rawMaterials.find((r) => r.id === rawMaterialId);
@@ -188,7 +189,7 @@ function RestockModal({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          onSubmit(rm.id, quantity, cost, asExpense);
+          onSubmit(rm.id, quantity, cost, asExpense).catch(reportError);
           onClose();
           setQuantity(0);
           setCost(0);
@@ -236,12 +237,13 @@ function ProduceModal({
   open: boolean;
   onClose: () => void;
   productId: string | null;
-  onSubmit: (id: string, quantity: number) => { ok: boolean; warning?: string };
+  onSubmit: (id: string, quantity: number) => Promise<{ ok: boolean; warning?: string }>;
 }) {
   const { products, recipes, rawMaterials } = useStore();
   const [selected, setSelected] = useState(productId ?? "");
   const [quantity, setQuantity] = useState(1);
   const [warning, setWarning] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const activeId = selected || productId || products[0]?.id;
   const recipe = useMemo(() => recipes[activeId] ?? [], [recipes, activeId]);
@@ -252,15 +254,20 @@ function ProduceModal({
     <Modal open={open} onClose={onClose} title="Produce finished goods">
       <form
         className="space-y-4"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          const result = onSubmit(activeId, quantity);
-          if (result.warning) {
-            setWarning(result.warning);
-          } else {
-            onClose();
-            setQuantity(1);
-            setWarning(null);
+          setSubmitting(true);
+          try {
+            const result = await onSubmit(activeId, quantity);
+            if (result.warning) {
+              setWarning(result.warning);
+            } else {
+              onClose();
+              setQuantity(1);
+              setWarning(null);
+            }
+          } finally {
+            setSubmitting(false);
           }
         }}
       >
@@ -320,8 +327,8 @@ function ProduceModal({
           </div>
         )}
 
-        <Button type="submit" className="w-full">
-          {warning ? "Proceed anyway" : "Confirm production"}
+        <Button type="submit" className="w-full" disabled={submitting}>
+          {submitting ? "Saving..." : warning ? "Proceed anyway" : "Confirm production"}
         </Button>
       </form>
     </Modal>
@@ -345,7 +352,7 @@ function AdjustModal({
     direction: "in" | "out",
     quantity: number,
     reason: string
-  ) => void;
+  ) => Promise<void>;
 }) {
   const { rawMaterials, products } = useStore();
   const [direction, setDirection] = useState<"in" | "out">("out");
@@ -366,7 +373,7 @@ function AdjustModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (!reason.trim()) return;
-          onSubmit(itemType, itemId, direction, quantity, reason.trim());
+          onSubmit(itemType, itemId, direction, quantity, reason.trim()).catch(reportError);
           onClose();
           setQuantity(0);
           setReason("");

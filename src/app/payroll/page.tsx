@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { PageHeader, Card, Button, Badge, Modal, Field, inputClass } from "@/components/ui";
 import { peso, formatDate } from "@/lib/format";
+import { reportError } from "@/lib/errors";
 import type { PayType } from "@/lib/types";
 
 export default function PayrollPage() {
@@ -108,7 +109,9 @@ export default function PayrollPage() {
                       {!r.paidOn && (
                         <button
                           className="text-xs text-black/60 hover:text-black underline underline-offset-2"
-                          onClick={() => markPayrollPaid(r.id, new Date().toISOString().slice(0, 10))}
+                          onClick={() =>
+                            markPayrollPaid(r.id, new Date().toISOString().slice(0, 10)).catch(reportError)
+                          }
                         >
                           Mark as paid
                         </button>
@@ -138,7 +141,7 @@ function AddStaffModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSubmit: (s: { name: string; position: string; payType: PayType; rate: number; active: boolean }) => void;
+  onSubmit: (s: { name: string; position: string; payType: PayType; rate: number; active: boolean }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [position, setPosition] = useState("");
@@ -152,7 +155,7 @@ function AddStaffModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (!name.trim() || !position.trim()) return;
-          onSubmit({ name: name.trim(), position: position.trim(), payType, rate, active: true });
+          onSubmit({ name: name.trim(), position: position.trim(), payType, rate, active: true }).catch(reportError);
           setName("");
           setPosition("");
           setPayType("Fixed Salary");
@@ -204,7 +207,7 @@ function NewRunModal({
     baseAmount: number;
     bonus: number;
     deduction: number;
-  }) => void;
+  }) => Promise<void>;
 }) {
   const { staff } = useStore();
   const [staffId, setStaffId] = useState(staff[0]?.id ?? "");
@@ -221,7 +224,7 @@ function NewRunModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (!staffId) return;
-          onSubmit({ staffId, periodStart, periodEnd, baseAmount, bonus, deduction });
+          onSubmit({ staffId, periodStart, periodEnd, baseAmount, bonus, deduction }).catch(reportError);
           setBaseAmount(0);
           setBonus(0);
           setDeduction(0);

@@ -15,19 +15,10 @@ import type {
   PaymentMethod,
   Expense,
   Staff,
+  PayType,
   PayrollRun,
 } from "./types";
-import {
-  products as initialProducts,
-  rawMaterials as initialRawMaterials,
-  finishedGoods as initialFinishedGoods,
-  recipes as initialRecipes,
-  inventoryMovements as initialMovements,
-  orders as initialOrders,
-  expenses as initialExpenses,
-  staff as initialStaff,
-  payrollRuns as initialPayrollRuns,
-} from "./mockData";
+import * as actions from "./actions";
 
 const DEMO_USERS: Record<string, AuthUser & { password: string }> = {
   "owner@rafe.ph": {
@@ -49,6 +40,8 @@ const DEMO_USERS: Record<string, AuthUser & { password: string }> = {
 interface StoreState {
   user: AuthUser | null;
   hydrated: boolean;
+  dataLoading: boolean;
+  dataError: string | null;
   products: Product[];
   rawMaterials: RawMaterial[];
   finishedGoods: FinishedGood[];
@@ -64,39 +57,67 @@ interface StoreActions {
   login: (email: string, password: string) => { ok: boolean; error?: string };
   loginAs: (role: Role) => void;
   logout: () => void;
-  restockRawMaterial: (rawMaterialId: string, quantity: number, cost: number, createAsExpense: boolean) => void;
-  produceFinishedGoods: (productId: string, quantity: number) => { ok: boolean; warning?: string };
+  refresh: () => Promise<void>;
+  restockRawMaterial: (rawMaterialId: string, quantity: number, cost: number, createAsExpense: boolean) => Promise<void>;
+  produceFinishedGoods: (productId: string, quantity: number) => Promise<{ ok: boolean; warning?: string }>;
   adjustStock: (
     itemType: "raw_material" | "finished_good",
     itemId: string,
     direction: "in" | "out",
     quantity: number,
     reason: string
-  ) => void;
-  addOrder: (order: Omit<Order, "id" | "createdBy">) => void;
-  updateOrderStatus: (orderId: string, status: OrderStatus) => void;
-  updateOrderPayment: (orderId: string, paymentStatus: PaymentStatus, amountPaid: number, paymentMethod: PaymentMethod) => void;
-  addExpense: (expense: Omit<Expense, "id">) => void;
-  addStaff: (s: Omit<Staff, "id">) => void;
-  markPayrollPaid: (payrollRunId: string, paidOn: string) => void;
-  addPayrollRun: (run: Omit<PayrollRun, "id" | "total">) => void;
+  ) => Promise<void>;
+  addOrder: (order: Omit<Order, "id" | "createdBy">) => Promise<void>;
+  updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
+  updateOrderPayment: (orderId: string, paymentStatus: PaymentStatus, amountPaid: number, paymentMethod: PaymentMethod) => Promise<void>;
+  addExpense: (expense: Omit<Expense, "id">) => Promise<void>;
+  addStaff: (s: { name: string; position: string; payType: PayType; rate: number; active: boolean }) => Promise<void>;
+  markPayrollPaid: (payrollRunId: string, paidOn: string) => Promise<void>;
+  addPayrollRun: (run: { staffId: string; periodStart: string; periodEnd: string; baseAmount: number; bonus: number; deduction: number }) => Promise<void>;
 }
 
 type Store = StoreState & StoreActions;
 
 const StoreContext = createContext<Store | null>(null);
 
-let idCounter = 2000;
-function nextId(prefix: string) {
-  idCounter += 1;
-  return `${prefix}${idCounter}`;
-}
-
 const SESSION_KEY = "rafe-ph-demo-session";
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
+  const [finishedGoods, setFinishedGoods] = useState<FinishedGood[]>([]);
+  const [recipes, setRecipes] = useState<Record<string, RecipeItem[]>>({});
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setDataLoading(true);
+    setDataError(null);
+    try {
+      const all = await actions.getAllData();
+      setProducts(all.products);
+      setRawMaterials(all.rawMaterials);
+      setFinishedGoods(all.finishedGoods);
+      setRecipes(all.recipes);
+      setMovements(all.movements);
+      setOrders(all.orders);
+      setExpenses(all.expenses);
+      setStaff(all.staff);
+      setPayrollRuns(all.payrollRuns);
+    } catch (err) {
+      setDataError(err instanceof Error ? err.message : "Failed to load data from Supabase.");
+    } finally {
+      setDataLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -119,15 +140,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, hydrated]);
 
-  const [products] = useState<Product[]>(initialProducts);
-  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>(initialRawMaterials);
-  const [finishedGoods, setFinishedGoods] = useState<FinishedGood[]>(initialFinishedGoods);
-  const [recipes] = useState<Record<string, RecipeItem[]>>(initialRecipes);
-  const [movements, setMovements] = useState<InventoryMovement[]>(initialMovements);
-  const [orders, setOrders] = useState<Order[]>(initialOrders);
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
-  const [staff, setStaff] = useState<Staff[]>(initialStaff);
-  const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>(initialPayrollRuns);
+  useEffect(() => {
+    if (!hydrated || !user) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch Supabase data once a session exists
+    void refresh();
+  }, [hydrated, user, refresh]);
 
   const login = useCallback((email: string, password: string) => {
     const record = DEMO_USERS[email.trim().toLowerCase()];
@@ -148,216 +165,117 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const actorName = user?.name ?? "Unknown";
 
   const restockRawMaterial = useCallback(
-    (rawMaterialId: string, quantity: number, cost: number, createAsExpense: boolean) => {
+    async (rawMaterialId: string, quantity: number, cost: number, createAsExpense: boolean) => {
+      const { movement, expense } = await actions.restockRawMaterial(rawMaterialId, quantity, cost, createAsExpense, actorName);
       setRawMaterials((prev) =>
         prev.map((rm) => (rm.id === rawMaterialId ? { ...rm, quantityOnHand: rm.quantityOnHand + quantity } : rm))
       );
-      const movementId = nextId("im");
-      setMovements((prev) => [
-        {
-          id: movementId,
-          itemType: "raw_material",
-          itemId: rawMaterialId,
-          direction: "in",
-          quantity,
-          reason: "Restock",
-          createdBy: actorName,
-          createdAt: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      if (createAsExpense) {
-        const rm = rawMaterials.find((r) => r.id === rawMaterialId);
-        setExpenses((prev) => [
-          {
-            id: nextId("e"),
-            date: new Date().toISOString().slice(0, 10),
-            category: "Materials",
-            amount: cost,
-            description: `Restock: ${rm?.name ?? rawMaterialId} (${quantity} ${rm?.unit ?? ""})`,
-            supplier: rm?.supplier,
-            linkedRestockId: movementId,
-          },
-          ...prev,
-        ]);
-      }
+      setMovements((prev) => [movement, ...prev]);
+      if (expense) setExpenses((prev) => [expense, ...prev]);
     },
-    [actorName, rawMaterials]
+    [actorName]
   );
 
   const produceFinishedGoods = useCallback(
-    (productId: string, quantity: number) => {
-      const recipe = recipes[productId];
-      let warning: string | undefined;
-      if (recipe && recipe.length > 0) {
-        for (const item of recipe) {
-          const rm = rawMaterials.find((r) => r.id === item.rawMaterialId);
-          const needed = item.quantityPerUnit * quantity;
-          if (rm && rm.quantityOnHand < needed) {
-            warning = `Not enough ${rm.name} on hand (need ${needed}${rm.unit}, have ${rm.quantityOnHand}${rm.unit}). Proceeding anyway.`;
-          }
-        }
-        setRawMaterials((prev) =>
-          prev.map((rm) => {
-            const item = recipe.find((r) => r.rawMaterialId === rm.id);
-            if (!item) return rm;
-            return { ...rm, quantityOnHand: rm.quantityOnHand - item.quantityPerUnit * quantity };
-          })
-        );
-        setMovements((prev) => [
-          ...recipe.map((item) => ({
-            id: nextId("im"),
-            itemType: "raw_material" as const,
-            itemId: item.rawMaterialId,
-            direction: "out" as const,
-            quantity: item.quantityPerUnit * quantity,
-            reason: `Production use - ${productId}`,
-            createdBy: actorName,
-            createdAt: new Date().toISOString(),
-          })),
-          ...prev,
-        ]);
-      }
-      setFinishedGoods((prev) =>
-        prev.map((fg) => (fg.productId === productId ? { ...fg, quantityOnHand: fg.quantityOnHand + quantity } : fg))
+    async (productId: string, quantity: number) => {
+      const result = await actions.produceFinishedGoods(productId, quantity, actorName);
+      setRawMaterials((prev) =>
+        prev.map((rm) => result.rawMaterials.find((u) => u.id === rm.id) ?? rm)
       );
-      setMovements((prev) => [
-        {
-          id: nextId("im"),
-          itemType: "finished_good",
-          itemId: productId,
-          direction: "in",
-          quantity,
-          reason: "Production run",
-          createdBy: actorName,
-          createdAt: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      return { ok: true, warning };
+      setFinishedGoods((prev) => prev.map((fg) => (fg.productId === productId ? result.finishedGood : fg)));
+      setMovements((prev) => [...result.movements, ...prev]);
+      return { ok: true, warning: result.warning };
     },
-    [recipes, rawMaterials, actorName]
+    [actorName]
   );
 
   const adjustStock = useCallback(
-    (
+    async (
       itemType: "raw_material" | "finished_good",
       itemId: string,
       direction: "in" | "out",
       quantity: number,
       reason: string
     ) => {
-      const delta = direction === "in" ? quantity : -quantity;
-      if (itemType === "raw_material") {
-        setRawMaterials((prev) =>
-          prev.map((rm) => (rm.id === itemId ? { ...rm, quantityOnHand: rm.quantityOnHand + delta } : rm))
-        );
-      } else {
-        setFinishedGoods((prev) =>
-          prev.map((fg) => (fg.productId === itemId ? { ...fg, quantityOnHand: fg.quantityOnHand + delta } : fg))
-        );
+      const result = await actions.adjustStock(itemType, itemId, direction, quantity, reason, actorName);
+      if (result.rawMaterial) {
+        const updated = result.rawMaterial;
+        setRawMaterials((prev) => prev.map((rm) => (rm.id === itemId ? updated : rm)));
       }
-      setMovements((prev) => [
-        {
-          id: nextId("im"),
-          itemType,
-          itemId,
-          direction,
-          quantity,
-          reason,
-          createdBy: actorName,
-          createdAt: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
+      if (result.finishedGood) {
+        const updated = result.finishedGood;
+        setFinishedGoods((prev) => prev.map((fg) => (fg.productId === itemId ? updated : fg)));
+      }
+      setMovements((prev) => [result.movement, ...prev]);
     },
     [actorName]
   );
 
   const addOrder = useCallback(
-    (order: Omit<Order, "id" | "createdBy">) => {
-      setOrders((prev) => [{ ...order, id: nextId("o"), createdBy: actorName }, ...prev]);
+    async (order: Omit<Order, "id" | "createdBy">) => {
+      const created = await actions.addOrder(order, actorName);
+      setOrders((prev) => [created, ...prev]);
     },
     [actorName]
   );
 
   const updateOrderStatus = useCallback(
-    (orderId: string, status: OrderStatus) => {
-      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
-      if (status === "Completed" || status === "Delivered") {
-        const order = orders.find((o) => o.id === orderId);
-        if (order) {
-          setFinishedGoods((prev) =>
-            prev.map((fg) => {
-              const item = order.items.find((i) => i.productId === fg.productId);
-              if (!item) return fg;
-              return { ...fg, quantityOnHand: Math.max(0, fg.quantityOnHand - item.quantity) };
-            })
-          );
-          setMovements((prev) => [
-            ...order.items.map((item) => ({
-              id: nextId("im"),
-              itemType: "finished_good" as const,
-              itemId: item.productId,
-              direction: "out" as const,
-              quantity: item.quantity,
-              reason: `Order ${orderId} fulfilled`,
-              relatedOrderId: orderId,
-              createdBy: actorName,
-              createdAt: new Date().toISOString(),
-            })),
-            ...prev,
-          ]);
-        }
+    async (orderId: string, status: OrderStatus) => {
+      const result = await actions.updateOrderStatus(orderId, status, actorName);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? result.order : o)));
+      if (result.finishedGoods.length > 0) {
+        setFinishedGoods((prev) =>
+          prev.map((fg) => result.finishedGoods.find((u) => u.productId === fg.productId) ?? fg)
+        );
+      }
+      if (result.movements.length > 0) {
+        setMovements((prev) => [...result.movements, ...prev]);
       }
     },
-    [orders, actorName]
+    [actorName]
   );
 
   const updateOrderPayment = useCallback(
-    (orderId: string, paymentStatus: PaymentStatus, amountPaid: number, paymentMethod: PaymentMethod) => {
-      setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, paymentStatus, amountPaid, paymentMethod } : o))
-      );
+    async (orderId: string, paymentStatus: PaymentStatus, amountPaid: number, paymentMethod: PaymentMethod) => {
+      const updated = await actions.updateOrderPayment(orderId, paymentStatus, amountPaid, paymentMethod);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
     },
     []
   );
 
-  const addExpense = useCallback((expense: Omit<Expense, "id">) => {
-    setExpenses((prev) => [{ ...expense, id: nextId("e") }, ...prev]);
+  const addExpense = useCallback(async (expense: Omit<Expense, "id">) => {
+    const created = await actions.addExpense(expense);
+    setExpenses((prev) => [created, ...prev]);
   }, []);
 
-  const addStaffMember = useCallback((s: Omit<Staff, "id">) => {
-    setStaff((prev) => [...prev, { ...s, id: nextId("s") }]);
+  const addStaffMember = useCallback(
+    async (s: { name: string; position: string; payType: PayType; rate: number; active: boolean }) => {
+      const created = await actions.addStaff(s);
+      setStaff((prev) => [...prev, created]);
+    },
+    []
+  );
+
+  const markPayrollPaid = useCallback(async (payrollRunId: string, paidOn: string) => {
+    const { run, expense } = await actions.markPayrollPaid(payrollRunId, paidOn);
+    setPayrollRuns((prev) => prev.map((pr) => (pr.id === payrollRunId ? run : pr)));
+    setExpenses((prev) => [expense, ...prev]);
   }, []);
 
-  const markPayrollPaid = useCallback((payrollRunId: string, paidOn: string) => {
-    setPayrollRuns((prev) => prev.map((pr) => (pr.id === payrollRunId ? { ...pr, paidOn } : pr)));
-    const run = payrollRuns.find((p) => p.id === payrollRunId);
-    const member = staff.find((s) => s.id === run?.staffId);
-    if (run) {
-      setExpenses((prev) => [
-        {
-          id: nextId("e"),
-          date: paidOn,
-          category: "Payroll",
-          amount: run.total,
-          description: `Payroll: ${member?.name ?? run.staffId} (${run.periodStart} to ${run.periodEnd})`,
-        },
-        ...prev,
-      ]);
-    }
-  }, [payrollRuns, staff]);
-
-  const addPayrollRun = useCallback((run: Omit<PayrollRun, "id" | "total">) => {
-    const total = run.baseAmount + run.bonus - run.deduction;
-    setPayrollRuns((prev) => [...prev, { ...run, id: nextId("pr"), total }]);
-  }, []);
+  const addPayrollRun = useCallback(
+    async (run: { staffId: string; periodStart: string; periodEnd: string; baseAmount: number; bonus: number; deduction: number }) => {
+      const created = await actions.addPayrollRun(run);
+      setPayrollRuns((prev) => [...prev, created]);
+    },
+    []
+  );
 
   const value = useMemo<Store>(
     () => ({
       user,
       hydrated,
+      dataLoading,
+      dataError,
       products,
       rawMaterials,
       finishedGoods,
@@ -370,6 +288,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       login,
       loginAs,
       logout,
+      refresh,
       restockRawMaterial,
       produceFinishedGoods,
       adjustStock,
@@ -384,6 +303,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [
       user,
       hydrated,
+      dataLoading,
+      dataError,
       products,
       rawMaterials,
       finishedGoods,
@@ -396,6 +317,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       login,
       loginAs,
       logout,
+      refresh,
       restockRawMaterial,
       produceFinishedGoods,
       adjustStock,
