@@ -1,4 +1,4 @@
--- Rafe.ph business manager — schema + seed data
+-- Rafe.ph business manager - schema + seed data
 -- Run this once in the Supabase SQL Editor (Project -> SQL Editor -> New query -> paste -> Run).
 -- Safe to re-run: it drops and recreates the app's tables only.
 
@@ -121,7 +121,7 @@ create table payroll_runs (
 );
 
 -- Row Level Security: enabled with no policies on every table.
--- This app never talks to Supabase from the browser — all reads/writes go through
+-- This app never talks to Supabase from the browser - all reads/writes go through
 -- Next.js Server Actions using the service_role key, which bypasses RLS by design.
 -- With RLS on and no policies, the anon/publishable key (if it ever leaked) gets
 -- zero access to this data via the REST API.
